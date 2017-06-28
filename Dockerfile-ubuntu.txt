@@ -1,13 +1,11 @@
-FROM resin/rpi-raspbian:latest
+FROM ubuntu:16.04
 
 # Update and install core build tools
 RUN apt-get update
-RUN apt-get install -y apt-utils
-RUN apt-get install -y curl git wget unzip
-RUN apt-get install build-essential
+RUN apt-get install -y apt-utils curl git wget unzip
 
 # Install npm, nodejs
-RUN apt-get remove nodered -y
+# RUN apt-get remove nodered -y
 RUN apt-get remove nodejs nodejs-legacy -y
 RUN apt-get remove npm -y
 
