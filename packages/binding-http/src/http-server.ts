@@ -1,21 +1,17 @@
-/*
- * W3C Software License
- *
- * Copyright (c) 2018 the thingweb community
- *
- * THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR
- * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF
- * MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
- * SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS,
- * TRADEMARKS OR OTHER RIGHTS.
- *
- * COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR
- * CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
- *
- * The name and trademarks of copyright holders may NOT be used in advertising or
- * publicity pertaining to the work without specific, written prior permission. Title
- * to copyright in this work will at all times remain with copyright holders.
- */
+/********************************************************************************
+ * Copyright (c) 2018 Contributors to the Eclipse Foundation
+ * 
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ * 
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0, or the W3C Software Notice and
+ * Document License (2015-05-13) which is available at
+ * https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document.
+ * 
+ * SPDX-License-Identifier: EPL-2.0 OR W3C-20150513
+ ********************************************************************************/
 
 /**
  * HTTP Server based on http
@@ -24,7 +20,8 @@
 import * as http from "http";
 import * as url from "url";
 
-import { ProtocolServer, ResourceListener, ContentSerdes } from "@node-wot/core";
+import TDResourceListener, { ProtocolServer, ResourceListener, ContentSerdes } from "@node-wot/core";
+import { PropertyResourceListener, ActionResourceListener, EventResourceListener } from "@node-wot/core";
 
 export default class HttpServer implements ProtocolServer {
 
@@ -101,7 +98,6 @@ export default class HttpServer implements ProtocolServer {
   }
 
   private handleRequest(req: http.IncomingMessage, res: http.ServerResponse) {
-    console.log(`HttpServer on port ${this.getPort()} received ${req.method} ${req.url} from ${req.socket.remoteAddress} port ${req.socket.remotePort}`);
 
     res.on('finish', () => {
       console.log(`HttpServer on port ${this.getPort()} replied with ${res.statusCode} to ${req.socket.remoteAddress} port ${req.socket.remotePort}`);
@@ -122,27 +118,32 @@ export default class HttpServer implements ProtocolServer {
     let requestHandler = this.resources[requestUri.pathname];
     let contentTypeHeader: string | string[] = req.headers["content-type"];
     let mediaType: string = Array.isArray(contentTypeHeader) ? contentTypeHeader[0] : contentTypeHeader;
+
+    console.log(`HttpServer on port ${this.getPort()} received ${req.method} ${requestUri.pathname} from ${req.socket.remoteAddress} port ${req.socket.remotePort}`);
+    
     // FIXME must be rejected with 415 Unsupported Media Type, guessing not allowed -> debug/testing flag
-    if (!mediaType || mediaType.length == 0) {
-      console.warn(`HttpServer on port ${this.getPort()} got no Media Type from '${requestUri.pathname}'`);
+    if ((req.method === "PUT" || req.method === "POST") && (!mediaType || mediaType.length == 0)) {
+      console.warn(`HttpServer on port ${this.getPort()} got no Media Type for ${req.method}`);
       mediaType = ContentSerdes.DEFAULT;
     }
 
     if (requestHandler === undefined) {
       res.writeHead(404);
       res.end("Not Found");
+
     } else if ( (req.method === "PUT" || req.method === "POST")
               && ContentSerdes.get().getSupportedMediaTypes().indexOf(ContentSerdes.get().isolateMediaType(mediaType))<0) {
       res.writeHead(415);
       res.end("Unsupported Media Type");
+
     } else {
-      if (req.method === "GET") {
+      if (req.method === "GET" && (requestHandler.getType()==="Property" || requestHandler.getType()==="Asset" ||(requestHandler.getType()==="TD"))) {
         requestHandler.onRead()
           .then(content => {
             if (!content.mediaType) {
               console.warn(`HttpServer on port ${this.getPort()} got no Media Type from ${req.socket.remoteAddress} port ${req.socket.remotePort}`);
             } else {
-              res.setHeader('Content-Type', content.mediaType);
+              res.setHeader("Content-Type", content.mediaType);
             }
             res.writeHead(200);
             res.end(content.body);
@@ -152,7 +153,8 @@ export default class HttpServer implements ProtocolServer {
             res.writeHead(500);
             res.end(err.message);
           });
-      } else if (req.method === "PUT") {
+
+      } else if (req.method === "PUT" && requestHandler.getType()==="Property" || requestHandler.getType()==="Asset") {
         let body: Array<any> = [];
         req.on("data", (data) => { body.push(data) });
         req.on("end", () => {
@@ -168,7 +170,8 @@ export default class HttpServer implements ProtocolServer {
               res.end(err.message);
             });
         });
-      } else if (req.method === "POST") {
+
+      } else if (req.method === "POST" && requestHandler.getType()==="Action") {
         let body: Array<any> = [];
         req.on("data", (data) => { body.push(data) });
         req.on("end", () => {
@@ -195,6 +198,26 @@ export default class HttpServer implements ProtocolServer {
               res.end(err.message);
             });
         });
+
+      } else if (requestHandler instanceof EventResourceListener) {
+        res.setHeader("Connection", "Keep-Alive");
+        // FIXME get supported content types from EventResourceListener
+        res.setHeader("Content-Type", ContentSerdes.DEFAULT);
+        res.writeHead(200);
+        let subscription = requestHandler.subscribe({
+          next: (content) => res.end(content.body),
+          complete: () => res.end()
+        });
+        res.on("close", () => {
+          console.warn(`HttpServer on port ${this.getPort()} lost Event connection`);
+          subscription.unsubscribe();
+        });
+        res.on("finish", () => {
+          console.warn(`HttpServer on port ${this.getPort()} closed Event connection`);
+          subscription.unsubscribe();
+        });
+        res.setTimeout(60*60*1000, () => subscription.unsubscribe());
+
       } else if (req.method === "DELETE") {
         requestHandler.onUnlink()
           .then(() => {
@@ -206,6 +229,7 @@ export default class HttpServer implements ProtocolServer {
             res.writeHead(500);
             res.end(err.message);
           });
+
       } else {
         res.writeHead(405);
         res.end("Method Not Allowed");

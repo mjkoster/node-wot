@@ -1,22 +1,18 @@
 #!/usr/bin/env node
-/*
- * W3C Software License
- *
- * Copyright (c) 2018 the thingweb community
- *
- * THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR
- * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF
- * MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
- * SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS,
- * TRADEMARKS OR OTHER RIGHTS.
- *
- * COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR
- * CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
- *
- * The name and trademarks of copyright holders may NOT be used in advertising or
- * publicity pertaining to the work without specific, written prior permission. Title
- * to copyright in this work will at all times remain with copyright holders.
- */
+/********************************************************************************
+ * Copyright (c) 2018 Contributors to the Eclipse Foundation
+ * 
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ * 
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0, or the W3C Software Notice and
+ * Document License (2015-05-13) which is available at
+ * https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document.
+ * 
+ * SPDX-License-Identifier: EPL-2.0 OR W3C-20150513
+ ********************************************************************************/
 
 "use strict";
 
@@ -59,7 +55,7 @@ const runScripts = function(srv : DefaultServient, scripts : Array<string>) : vo
                 console.error("WoT-Servient experienced error while reading script", err);
             } else {
                 // limit printout to first line
-                console.info(`WoT-Servient running script '${data.substr(0, data.indexOf("\n"))}...'`);
+                console.info(`WoT-Servient running script '${data.substr(0, data.indexOf("\n")).replace("\r", "")}'... (${data.split(/\r\n|\r|\n/).length} lines)`);
                 srv.runPrivilegedScript(data, fname);
             }
         });
@@ -103,7 +99,9 @@ wot-servient.conf.json:
         "scriptAction": RUNSCRIPT
     },
     "http": {
-        "port": HPORT
+        "port": HPORT,
+        "proxy": PROXY,
+        "allowSelfSigned": ALLOW
     },
     "credentials": {
         THING_ID1: {
@@ -118,6 +116,8 @@ wot-servient.conf.json:
   AUTORUN is a path string for the directory to load at startup
   RUNSCRIPT is a boolean indicating whether to provide the 'runScript' Action
   HPORT is a number defining the HTTP listening port
+  PROXY is an object with "href" for the proxy URI, "authorization" for "Basic" or "Bearer", and then corresponding credential fields "username"/"password" or "token" as defined below
+  ALLOW is a boolean indicating whether self-signed certificates should be allowed
   THING_IDx is a TD @id for which credentials should be configured
   TOKEN is an OAuth (Bearer) token
   USERNAME is an HTTP Basic Auth username

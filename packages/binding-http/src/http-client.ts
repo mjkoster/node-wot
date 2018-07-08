@@ -1,21 +1,17 @@
-/*
- * W3C Software License
- *
- * Copyright (c) 2018 the thingweb community
- *
- * THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR
- * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF
- * MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
- * SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS,
- * TRADEMARKS OR OTHER RIGHTS.
- *
- * COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR
- * CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
- *
- * The name and trademarks of copyright holders may NOT be used in advertising or
- * publicity pertaining to the work without specific, written prior permission. Title
- * to copyright in this work will at all times remain with copyright holders.
- */
+/********************************************************************************
+ * Copyright (c) 2018 Contributors to the Eclipse Foundation
+ * 
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ * 
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0, or the W3C Software Notice and
+ * Document License (2015-05-13) which is available at
+ * https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document.
+ * 
+ * SPDX-License-Identifier: EPL-2.0 OR W3C-20150513
+ ********************************************************************************/
 
 /**
  * HTTP client based on http
@@ -26,24 +22,29 @@ import * as https from "https";
 import * as url from "url";
 
 import { ProtocolClient, Content } from "@node-wot/core";
+import { HttpForm, HttpHeader, HttpConfig } from "./http";
 
 export default class HttpClient implements ProtocolClient {
 
   private readonly agent: http.Agent;
-  private readonly provider : any;
-  private proxyOptions : http.RequestOptions = null;
-  private authorization : string = null;
+  private readonly provider: any;
+  private proxyOptions: http.RequestOptions = null;
+  private authorization: string = null;
+  private allowSelfSigned: boolean = false;
 
-  constructor(proxy : any = null, secure = false) {
+  constructor(config: HttpConfig = null, secure = false) {
+
     // config proxy by client side (not from TD)
-    if (proxy!==null && proxy.href!==null) {
-      this.proxyOptions = this.uriToOptions(proxy.href);
-      if (proxy.authorization == "Basic") {
-        this.proxyOptions.headers = { };
-        this.proxyOptions.headers['Proxy-Authorization'] = "Basic " + new Buffer(proxy.user+":"+proxy.password).toString('base64');
-      } else if (proxy.authorization == "Bearer") {
-        this.proxyOptions.headers = { };
-        this.proxyOptions.headers['Proxy-Authorization'] = "Bearer " + proxy.token;
+    if (config!==null && config.proxy && config.proxy.href) {
+      this.proxyOptions = this.uriToOptions(config.proxy.href);
+      if (config.proxy.authorization === "Basic") {
+        if (!config.proxy.username || !config.proxy.password) console.warn(`HttpClient client configured for Basic proxy auth, but no username/password given`);
+        this.proxyOptions.headers = {};
+        this.proxyOptions.headers['Proxy-Authorization'] = "Basic " + new Buffer(config.proxy.username + ":" + config.proxy.password).toString('base64');
+      } else if (config.proxy.authorization === "Bearer") {
+        if (!config.proxy.token) console.warn(`HttpClient client configured for Bearer proxy auth, but no token given`);
+        this.proxyOptions.headers = {};
+        this.proxyOptions.headers['Proxy-Authorization'] = "Bearer " + config.proxy.token;
       }
       // security for hop to proxy
       if (this.proxyOptions.protocol === "https") {
@@ -51,17 +52,24 @@ export default class HttpClient implements ProtocolClient {
       }
       console.info(`HttpClient using ${secure ? "secure " : ""}proxy ${this.proxyOptions.hostname}:${this.proxyOptions.port}`);
     }
+
+    // config certificate checks
+    if (config!==null && config.allowSelfSigned!==undefined) {
+      this.allowSelfSigned = config.allowSelfSigned;
+      console.warn(`HttpClient allowing self-signed/untrusted certificates -- USE FOR TESTING ONLY`);
+    }
+
     // using one client impl for both HTTP and HTTPS
-    this.agent = secure ? new https.Agent({ keepAlive: true }) : new http.Agent({ keepAlive: true });
+    this.agent = secure ? new https.Agent({ keepAlive: true, }) : new http.Agent({ keepAlive: true });
     this.provider = secure ? https : http;
   }
 
-  private getContentType(res : http.IncomingMessage) : string {
-    let header : string | string[] = res.headers['content-type']; // note: node http uses lower case here
-    if(Array.isArray(header)) {
+  private getContentType(res: http.IncomingMessage): string {
+    let header: string | string[] = res.headers['content-type']; // note: node http uses lower case here
+    if (Array.isArray(header)) {
       // this should never be the case as only cookie headers are returned as array
       // but anyways...
-      return (header.length > 0) ? header[0] : ""; 
+      return (header.length > 0) ? header[0] : "";
     } else {
       return header;
     }
@@ -71,15 +79,15 @@ export default class HttpClient implements ProtocolClient {
     return `[HttpClient]`;
   }
 
-  public readResource(uri: string): Promise<Content> {
+  public readResource(form: HttpForm): Promise<Content> {
     return new Promise<Content>((resolve, reject) => {
-      let options: http.RequestOptions = this.uriToOptions(uri);
 
-      // TODO get explicit binding from TD
-      options.method = 'GET';
-      console.log(`HttpClient sending ${options.method} ${options.path} to ${options.hostname}:${options.port}`);
-      let req = this.provider.request(options, (res : https.IncomingMessage) => {
-        console.log(`HttpClient received ${res.statusCode} from ${options.path}`);
+      let req = this.generateRequest(form, "GET");
+
+      console.log(`HttpClient sending ${req.method} to ${form.href}`);
+
+      req.on("response", (res: https.IncomingMessage) => {
+        console.log(`HttpClient received ${res.statusCode} from ${form.href}`);
         let mediaType: string = this.getContentType(res);
         //console.log(`HttpClient received Content-Type: ${mediaType}`);
         //console.log(`HttpClient received headers: ${JSON.stringify(res.headers)}`);
@@ -89,25 +97,23 @@ export default class HttpClient implements ProtocolClient {
           resolve({ mediaType: mediaType, body: Buffer.concat(body) });
         });
       });
-      req.on('error', (err : any) => reject(err));
+      req.on("error", (err: any) => reject(err));
       req.end();
     });
   }
 
-  public writeResource(uri: string, content: Content): Promise<any> {
+  public writeResource(form: HttpForm, content: Content): Promise<any> {
     return new Promise<void>((resolve, reject) => {
 
-      let options: http.RequestOptions = this.uriToOptions(uri);
+      let req = this.generateRequest(form, "PUT");
 
-      // TODO get explicit binding from TD
-      options.method = 'PUT';
-      // do not reset headers array
-      options.headers["Content-Type"] = content.mediaType;
-      options.headers["Content-Length"] = content.body.byteLength;
+      req.setHeader("Content-Type", content.mediaType);
+      req.setHeader("Content-Length", content.body.byteLength);
 
-      console.log(`HttpClient sending ${options.method} ${options.path} to ${options.hostname}:${options.port}`);
-      let req = this.provider.request(options, (res : https.IncomingMessage) => {
-        console.log(`HttpClient received ${res.statusCode} from ${uri}`);
+      console.log(`HttpClient sending ${req.method} with '${req.getHeader("Content-Type")}' to ${form.href}`);
+
+      req.on("response", (res: https.IncomingMessage) => {
+        console.log(`HttpClient received ${res.statusCode} from ${form.href}`);
         //console.log(`HttpClient received headers: ${JSON.stringify(res.headers)}`);
         // Although 204 without payload is expected, data must be read 
         // to complete request (http blocks socket otherwise)
@@ -118,28 +124,27 @@ export default class HttpClient implements ProtocolClient {
           resolve();
         });
       });
-      req.on('error', (err : any) => reject(err));
+      req.on('error', (err: any) => reject(err));
       req.write(content.body);
       req.end();
     });
   }
 
-  public invokeResource(uri: string, content?: Content): Promise<Content> {
+  public invokeResource(form: HttpForm, content?: Content): Promise<Content> {
     return new Promise<Content>((resolve, reject) => {
 
-      let options: http.RequestOptions = this.uriToOptions(uri);
+      let req = this.generateRequest(form, "POST");
 
-      // TODO get explicit binding from TD
-      options.method = 'POST';
       if (content) {
-        // do not reset headers array
-        options.headers["Content-Type"] = content.mediaType;
-        options.headers["Content-Length"] = content.body.byteLength;
+        req.setHeader("Content-Type", content.mediaType);
+        req.setHeader("Content-Length", content.body.byteLength);
       }
-      console.log(`HttpClient sending ${options.method} ${options.path} to ${options.hostname}:${options.port}`);
-      let req = this.provider.request(options, (res : https.IncomingMessage) => {
-        console.log(`HttpClient received ${res.statusCode} from ${uri}`);
-        let mediaType: string = this.getContentType(res);        
+
+      console.log(`HttpClient sending ${req.method} with '${req.getHeader("Content-Type")}' to ${form.href}`);
+
+      req.on("response", (res: https.IncomingMessage) => {
+        console.log(`HttpClient received ${res.statusCode} from ${form.href}`);
+        let mediaType: string = this.getContentType(res);
         //console.log(`HttpClient received Content-Type: ${mediaType}`);
         //console.log(`HttpClient received headers: ${JSON.stringify(res.headers)}`);
         let body: Array<any> = [];
@@ -148,7 +153,7 @@ export default class HttpClient implements ProtocolClient {
           resolve({ mediaType: mediaType, body: Buffer.concat(body) });
         });
       });
-      req.on('error', (err : any) => reject(err));
+      req.on("error", (err: any) => reject(err));
       if (content) {
         req.write(content.body);
       }
@@ -156,16 +161,19 @@ export default class HttpClient implements ProtocolClient {
     });
   }
 
-  public unlinkResource(uri: string): Promise<any> {
+  public unlinkResource(form: HttpForm): Promise<any> {
     return new Promise<void>((resolve, reject) => {
-      let options: http.RequestOptions = this.uriToOptions(uri);
+      let options: http.RequestOptions = this.uriToOptions(form.href);
 
-      // TODO get explicit binding from TD
       options.method = 'DELETE';
 
-      console.log(`HttpClient sending ${options.method} ${options.path} to ${options.hostname}:${options.port}`);
-      let req = this.provider.request(options, (res : https.IncomingMessage) => {
-        console.log(`HttpClient received ${res.statusCode} from ${uri}`);
+      let req = this.provider.request(options);
+      this.generateRequest(form, req);
+
+      console.log(`HttpClient sending ${req.method} to ${form.href}`);
+
+      req.on("response", (res: https.IncomingMessage) => {
+        console.log(`HttpClient received ${res.statusCode} from ${form.href}`);
         //console.log(`HttpClient received headers: ${JSON.stringify(res.headers)}`);
         // Although 204 without payload is expected, data must be read
         //  to complete request (http blocks socket otherwise)
@@ -176,7 +184,7 @@ export default class HttpClient implements ProtocolClient {
           resolve();
         });
       });
-      req.on('error', (err : any) => reject(err));
+      req.on('error', (err: any) => reject(err));
       req.end();
     });
   }
@@ -191,49 +199,55 @@ export default class HttpClient implements ProtocolClient {
   }
 
   public setSecurity(metadata: any, credentials?: any): boolean {
-    
-    if (metadata.authorization == "Basic") {
-      this.authorization = "Basic " + new Buffer(credentials.user+":"+credentials.password).toString('base64');
-      
-    } else if (metadata.authorization==="Bearer") {
+
+    if (Array.isArray(metadata)) {
+      metadata = metadata[0];
+    }
+
+    if (metadata.authorization === "Basic") {
+      this.authorization = "Basic " + new Buffer(credentials.username + ":" + credentials.password).toString('base64');
+
+    } else if (metadata.authorization === "Bearer") {
       // TODO get token from metadata.as (authorization server)
       this.authorization = "Bearer " + credentials.token;
-    
-    } else if (metadata.authorization==="Proxy" && metadata.href!==null) {
+
+    } else if (metadata.authorization === "Proxy" && metadata.href !== null) {
       if (this.proxyOptions !== null) {
         console.info(`HttpClient overriding client-side proxy with security metadata 'Proxy'`);
       }
       this.proxyOptions = this.uriToOptions(metadata.href);
       if (metadata.proxyauthorization == "Basic") {
-        this.proxyOptions.headers = { };
-        this.proxyOptions.headers['Proxy-Authorization'] = "Basic " + new Buffer(credentials.user+":"+credentials.password).toString('base64');
+        this.proxyOptions.headers = {};
+        this.proxyOptions.headers['Proxy-Authorization'] = "Basic " + new Buffer(credentials.username + ":" + credentials.password).toString('base64');
       } else if (metadata.proxyauthorization == "Bearer") {
-        this.proxyOptions.headers = { };
+        this.proxyOptions.headers = {};
         this.proxyOptions.headers['Proxy-Authorization'] = "Bearer " + credentials.token;
       }
-    
-    } else if (metadata.authorization==="SessionID") {
+
+    } else if (metadata.authorization === "SessionID") {
       // TODO this is just an idea sketch
-    
+      console.error(`HttpClient cannot use SessionID: Not implemented`);
+
     } else {
-      console.error(`HttpClient cannot use metadata ${metadata}`);
+      console.error(`HttpClient cannot set security metadata '${metadata.authorization}'`);
+      console.dir(metadata);
       return false;
     }
 
-    console.info(`HttpClient using security metadata '${metadata.authorization}'`);
+    console.log(`HttpClient using security metadata '${metadata.authorization}'`);
     return true;
   }
 
-  private uriToOptions(uri: string): http.RequestOptions {
+  private uriToOptions(uri: string): https.RequestOptions {
     let requestUri = url.parse(uri);
-    let options: http.RequestOptions = {};
+    let options: https.RequestOptions = {};
     options.agent = this.agent;
 
-    if (this.proxyOptions!=null) {
+    if (this.proxyOptions != null) {
       options.hostname = this.proxyOptions.hostname;
       options.port = this.proxyOptions.port;
       options.path = uri;
-      options.headers = { };
+      options.headers = {};
       // copy header fields for Proxy-Auth etc.
       for (let hf in this.proxyOptions.headers) options.headers[hf] = this.proxyOptions.headers[hf];
       options.headers["Host"] = requestUri.hostname;
@@ -241,14 +255,59 @@ export default class HttpClient implements ProtocolClient {
       options.hostname = requestUri.hostname;
       options.port = parseInt(requestUri.port, 10);
       options.path = requestUri.path;
-      options.headers = { };
+      options.headers = {};
     }
-    
-    if (this.authorization!==null) {
+
+    if (this.authorization !== null) {
       options.headers["Authorization"] = this.authorization;
+    }
+
+    if (this.allowSelfSigned === true) {
+      options.rejectUnauthorized = false;
     }
 
     return options;
   }
+  private generateRequest(form: HttpForm, dflt: string): any {
 
+    let options: http.RequestOptions = this.uriToOptions(form.href);
+
+    options.method = dflt;
+
+    if (typeof form["http:methodName"] === "string") {
+      console.log("HttpClient got Form 'methodName'", form["http:methodName"]);
+      switch (form["http:methodName"]) {
+        case "GET": options.method = "GET"; break;
+        case "POST": options.method = "POST"; break;
+        case "PUT": options.method = "PUT"; break;
+        case "DELETE": options.method = "DELETE"; break;
+        case "PATCH": options.method = "PATCH"; break;
+        default: console.warn("HttpClient got invalid 'methodName', using default", options.method);
+      }
+    }
+
+    let req = this.provider.request(options);
+
+    console.log(`HttpClient applying form`);
+    //console.dir(form);
+
+    // apply form data
+    if (typeof form.mediaType === "string") {
+      console.log("HttpClient got Form 'mediaType'", form.mediaType);
+      req.setHeader("Accept", form.mediaType);
+    }
+    if (Array.isArray(form["http:headers"])) {
+      console.log("HttpClient got Form 'headers'", form["http:headers"]);
+      let headers = form["http:headers"] as Array<HttpHeader>;
+      for (let option of headers) {
+        req.setHeader(option["http:fieldName"], option["http:fieldValue"]);
+      }
+    } else if (typeof form["http:headers"] === "object") {
+      console.warn("HttpClient got Form SINGLE-ENTRY 'headers'", form["http:headers"]);
+      let option = form["http:headers"] as HttpHeader;
+      req.setHeader(option["http:fieldName"], option["http:fieldValue"]);
+    }
+
+    return req;
+  }
 }

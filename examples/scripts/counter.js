@@ -5,50 +5,59 @@ const NAME_ACTION_DECREMENT = "decrement";
 const NAME_ACTION_RESET = "reset";
 
 let thing = WoT.produce({
-                name: "counter"
+    name: "counter"
 });
 
 console.log("Created thing " + thing.name);
 
 thing.addProperty({
-        name : NAME_PROPERTY_COUNT,
-        schema : '{ "type": "number"}',
-        value : 0,
-        observable : true,
-        writeable : true
+	name : NAME_PROPERTY_COUNT,
+	schema : '{ "type": "number"}',
+	value : 0,
+	observable : true,
+	writeable : true
 })
 
 thing.addAction({
-        name : NAME_ACTION_INCREMENT
+    name : NAME_ACTION_INCREMENT
 })
 
 thing.addAction({
-        name : NAME_ACTION_DECREMENT
+    name : NAME_ACTION_DECREMENT
 })
 
 thing.addAction({
-        name : NAME_ACTION_RESET
+    name : NAME_ACTION_RESET
 })
 
-thing.setActionHandler( () => {
-  console.log("Resetting");
-  thing.writeProperty(NAME_PROPERTY_COUNT, 0);
-  }, NAME_ACTION_RESET );
+thing.setActionHandler( 
+	NAME_ACTION_RESET,
+	(parameters) => {
+		console.log("Resetting");
+		thing.writeProperty(NAME_PROPERTY_COUNT, 0);
+	}
+);
 
-thing.setActionHandler( () => {
-  console.log("Incrementing");
-  return thing.readProperty(NAME_PROPERTY_COUNT).then(function(count){
-    let value = count + 1;
-    thing.writeProperty(NAME_PROPERTY_COUNT, value);
-    })
-  }, NAME_ACTION_INCREMENT );
+thing.setActionHandler(
+	NAME_ACTION_INCREMENT,
+	(parameters) => {
+		console.log("Incrementing");
+		return thing.readProperty(NAME_PROPERTY_COUNT).then(function(count){
+			let value = count + 1;
+			thing.writeProperty(NAME_PROPERTY_COUNT, value);
+		});
+	}
+);
 
-thing.setActionHandler( () => {
-  console.log("Decrementing");
-  return thing.readProperty(NAME_PROPERTY_COUNT).then(function(count){
-    let value = count - 1;
-    thing.writeProperty(NAME_PROPERTY_COUNT, value);
-    })
-  }, NAME_ACTION_DECREMENT );
+thing.setActionHandler(
+	NAME_ACTION_DECREMENT,
+	(parameters) => {
+		console.log("Decrementing");
+		return thing.readProperty(NAME_PROPERTY_COUNT).then(function(count){
+			let value = count - 1;
+			thing.writeProperty(NAME_PROPERTY_COUNT, value);
+		});
+	}
+);
 
 thing.start();

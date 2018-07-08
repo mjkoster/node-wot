@@ -1,21 +1,17 @@
-/*
- * W3C Software License
- *
- * Copyright (c) 2018 the thingweb community
- *
- * THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR
- * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF
- * MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
- * SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS,
- * TRADEMARKS OR OTHER RIGHTS.
- *
- * COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR
- * CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
- *
- * The name and trademarks of copyright holders may NOT be used in advertising or
- * publicity pertaining to the work without specific, written prior permission. Title
- * to copyright in this work will at all times remain with copyright holders.
- */
+/********************************************************************************
+ * Copyright (c) 2018 Contributors to the Eclipse Foundation
+ * 
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ * 
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0, or the W3C Software Notice and
+ * Document License (2015-05-13) which is available at
+ * https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document.
+ * 
+ * SPDX-License-Identifier: EPL-2.0 OR W3C-20150513
+ ********************************************************************************/
 
 import { Observable } from "rxjs/Observable";
 import * as WoT from "wot-typescript-definitions";
@@ -26,7 +22,6 @@ import Servient from "./servient";
 import ExposedThing from "./exposed-thing";
 import ConsumedThing from "./consumed-thing";
 import * as Helpers from "./helpers";
-
 
 export default class WoTImpl implements WoT.WoTFactory {
     private srv: Servient;
@@ -45,13 +40,12 @@ export default class WoTImpl implements WoT.WoTFactory {
         });
     }
 
-
     /** @inheritDoc */
-    fetch(url: USVString): Promise<WoT.ThingDescription> {
+    fetch(uri: USVString): Promise<WoT.ThingDescription> {
         return new Promise<WoT.ThingDescription>((resolve, reject) => {
-            let client = this.srv.getClientFor(Helpers.extractScheme(url));
-            console.info(`WoTImpl consuming TD from ${url} with ${client}`);
-            client.readResource(url)
+            let client = this.srv.getClientFor(Helpers.extractScheme(uri));
+            console.info(`WoTImpl fetching TD from '${uri}' with ${client}`);
+            client.readResource(new TD.InteractionForm(uri, "application/ld+json"))
                 .then((content) => {
                     if (content.mediaType !== "application/ld+json") {
                         console.warn(`WoTImpl parsing TD from '${content.mediaType}' media type`);
@@ -63,10 +57,18 @@ export default class WoTImpl implements WoT.WoTFactory {
         });
     }
 
-
     /** @inheritDoc */
     consume(td: WoT.ThingDescription): WoT.ConsumedThing {
-        return new ConsumedThing(this.srv, td) as WoT.ConsumedThing;
+
+        let trimmedTD = td.trim();
+
+        if (td[0]!=='{') {
+            throw new Error("WoT.consume() takes a Thing Description. Use WoT.fetch() for URIs.");
+        }
+
+        let newThing = new ConsumedThing(this.srv, td);
+        console.info(`WoTImpl consuming TD ${newThing.id ? "'"+newThing.id+"'" : "without @id"} for ConsumedThing '${newThing.name}'`);
+        return newThing;
     }
 
     /**
@@ -100,11 +102,11 @@ export default class WoTImpl implements WoT.WoTFactory {
             throw new Error("WoTImpl could not create Thing because of unknown model argument " + model);
         }
 
-        console.info(`WoTImpl producing new ExposedThing`);
         let newThing = new ExposedThing(this.srv, td);
+        console.info(`WoTImpl producing new ExposedThing '${newThing.name}'`);
 
         if (this.srv.addThing(newThing)) {
-            return newThing as WoT.ExposedThing;
+            return newThing;
         } else {
             throw new Error("Thing already exists: " + newThing.name);
         }

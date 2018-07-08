@@ -1,21 +1,17 @@
-/*
- * W3C Software License
- *
- * Copyright (c) 2018 the thingweb community
- *
- * THIS WORK IS PROVIDED "AS IS," AND COPYRIGHT HOLDERS MAKE NO REPRESENTATIONS OR
- * WARRANTIES, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO, WARRANTIES OF
- * MERCHANTABILITY OR FITNESS FOR ANY PARTICULAR PURPOSE OR THAT THE USE OF THE
- * SOFTWARE OR DOCUMENT WILL NOT INFRINGE ANY THIRD PARTY PATENTS, COPYRIGHTS,
- * TRADEMARKS OR OTHER RIGHTS.
- *
- * COPYRIGHT HOLDERS WILL NOT BE LIABLE FOR ANY DIRECT, INDIRECT, SPECIAL OR
- * CONSEQUENTIAL DAMAGES ARISING OUT OF ANY USE OF THE SOFTWARE OR DOCUMENT.
- *
- * The name and trademarks of copyright holders may NOT be used in advertising or
- * publicity pertaining to the work without specific, written prior permission. Title
- * to copyright in this work will at all times remain with copyright holders.
- */
+/********************************************************************************
+ * Copyright (c) 2018 Contributors to the Eclipse Foundation
+ * 
+ * See the NOTICE file(s) distributed with this work for additional
+ * information regarding copyright ownership.
+ * 
+ * This program and the accompanying materials are made available under the
+ * terms of the Eclipse Public License v. 2.0 which is available at
+ * http://www.eclipse.org/legal/epl-2.0, or the W3C Software Notice and
+ * Document License (2015-05-13) which is available at
+ * https://www.w3.org/Consortium/Legal/2015/copyright-software-and-document.
+ * 
+ * SPDX-License-Identifier: EPL-2.0 OR W3C-20150513
+ ********************************************************************************/
 
 import * as WoT from "wot-typescript-definitions";
 
@@ -24,7 +20,6 @@ import * as TD from "@node-wot/td-tools";
 import Servient from "./servient";
 import * as Helpers from "./helpers";
 
-
 import { ProtocolClient } from "./resource-listeners/protocol-interfaces";
 
 import ContentSerdes from "./content-serdes"
@@ -32,25 +27,14 @@ import ContentSerdes from "./content-serdes"
 import { Observable } from 'rxjs/Observable';
 import { Subject } from 'rxjs/Subject';
 
-
 interface ClientAndForm {
     client: ProtocolClient
     form: TD.InteractionForm
 }
 
-export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
+export default class ConsumedThing extends TD.Thing implements WoT.ConsumedThing {
 
     protected readonly td: WoT.ThingDescription;
-
-    public readonly context: (string | Object)[];
-    public readonly name: string;
-    public readonly id: string;
-    public readonly semanticType: Array<WoT.SemanticType>;
-    public readonly metadata: Array<WoT.SemanticMetadata>;
-    public readonly security: any;
-    public readonly interaction: TD.Interaction[];
-    public readonly link: Array<any>;
-
     protected readonly srv: Servient;
     private clients: Map<string, ProtocolClient> = new Map();
     protected observablesEvent: Map<string, Subject<any>> = new Map();
@@ -59,7 +43,9 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
 
     constructor(servient: Servient, td: WoT.ThingDescription) {
 
-        this.srv = servient
+        super();
+        // asign containing Servient
+        this.srv = servient;
         // cache original TD
         this.td = td;
 
@@ -70,7 +56,11 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
         this.semanticType = tdObj.semanticType;
         this.name = tdObj.name;
         this.id = tdObj.id;
-        this.security = tdObj.security;
+        if (Array.isArray(tdObj.security) && tdObj.security.length>=1) {
+            this.security = tdObj.security;
+        } else if (typeof tdObj.security === "object" ) {
+            this.security = [tdObj.security];
+        }
         this.metadata = tdObj.metadata;
         this.interaction = tdObj.interaction;
         this.link = tdObj.link;
@@ -95,22 +85,22 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
 
         if (cacheIdx !== -1) {
             // from cache
-            console.log(`ConsumedThing '${this.name}' chose cached client for '${schemes[cacheIdx]}'`);
+            console.debug(`ConsumedThing '${this.name}' chose cached client for '${schemes[cacheIdx]}'`);
             let client = this.clients.get(schemes[cacheIdx]);
             let form = forms[cacheIdx];
             return { client: client, form: form };
         } else {
             // new client
-            console.log(`ConsumedThing '${this.name}' has no client in cache (${cacheIdx})`);
+            console.debug(`ConsumedThing '${this.name}' has no client in cache (${cacheIdx})`);
             let srvIdx = schemes.findIndex(scheme => this.srv.hasClientFor(scheme));
             if (srvIdx === -1) throw new Error(`ConsumedThing '${this.name}' missing ClientFactory for '${schemes}'`);
             let client = this.srv.getClientFor(schemes[srvIdx]);
             if (client) {
                 console.log(`ConsumedThing '${this.name}' got new client for '${schemes[srvIdx]}'`);
                 if (this.security) {
-                    console.warn("ConsumedThing applying security metadata");
-                    console.dir(this.security);
-                    client.setSecurity(this.security);
+                    console.log("ConsumedThing applying security metadata");
+                    //console.dir(this.security);
+                    client.setSecurity(this.security, this.srv.getCredentials(this.id));
                 }
                 this.clients.set(schemes[srvIdx], client);
                 let form = forms[srvIdx];
@@ -140,14 +130,14 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
                 if (!client) {
                     reject(new Error(`ConsumedThing '${this.name}' did not get suitable client for ${form.href}`));
                 } else {
-                    console.info(`ConsumedThing '${this.name}' reading ${form.href}`);
-                    client.readResource(form.href).then((content) => {
+                    console.log(`ConsumedThing '${this.name}' reading ${form.href}`);
+                    client.readResource(form).then((content) => {
                         if (!content.mediaType) content.mediaType = form.mediaType;
                         //console.log(`ConsumedThing decoding '${content.mediaType}' in readProperty`);
-                        let value = ContentSerdes.bytesToValue(content);
+                        let value = ContentSerdes.contentToValue(content);
                         resolve(value);
                     })
-                        .catch(err => { console.log("Failed to read because " + err); });
+                    .catch(err => { console.log("Failed to read because " + err); });
                 }
             }
         });
@@ -168,9 +158,9 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
                 if (!client) {
                     reject(new Error(`ConsumedThing '${this.name}' did not get suitable client for ${form.href}`));
                 } else {
-                    console.info(`ConsumedThing '${this.name}' writing ${form.href} with '${newValue}'`);
-                    let payload = ContentSerdes.valueToBytes(newValue, form.mediaType)
-                    resolve(client.writeResource(form.href, payload));
+                    console.log(`ConsumedThing '${this.name}' writing ${form.href} with '${newValue}'`);
+                    let content = ContentSerdes.valueToContent(newValue, form.mediaType)
+                    resolve(client.writeResource(form, content));
 
                     if (this.observablesPropertyChange.get(propertyName)) {
                         this.observablesPropertyChange.get(propertyName).next(newValue);
@@ -203,15 +193,15 @@ export default class ConsumedThing implements TD.Thing, WoT.ConsumedThing {
                 if (!client) {
                     reject(new Error(`ConsumedThing '${this.name}' did not get suitable client for ${form.href}`));
                 } else {
-                    console.info(`ConsumedThing '${this.name}' invoking ${form.href} with '${parameter}'`);
+                    console.log(`ConsumedThing '${this.name}' invoking ${form.href} with '${parameter}'`);
 
                     let mediaType = form.mediaType;
-                    let input = ContentSerdes.valueToBytes(parameter, form.mediaType.toString());
+                    let input = ContentSerdes.valueToContent(parameter, form.mediaType);
 
-                    client.invokeResource(form.href, input).then((output) => {
+                    client.invokeResource(form, input).then((output) => {
                         if (!output.mediaType) output.mediaType = form.mediaType;
                         //console.log(`ConsumedThing decoding '${output.mediaType}' in invokeAction`);
-                        let value = ContentSerdes.bytesToValue(output);
+                        let value = ContentSerdes.contentToValue(output);
                         resolve(value);
                     });
                 }
